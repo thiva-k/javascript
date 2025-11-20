@@ -56,7 +56,7 @@ import AuthAPI from './__temp__/api';
 import getMeOrganizations from './api/getMeOrganizations';
 import getScim2Me from './api/getScim2Me';
 import getSchemas from './api/getSchemas';
-import {AsgardeoReactConfig} from './models/config';
+import { AsgardeoReactConfig } from './models/config';
 import getAllOrganizations from './api/getAllOrganizations';
 
 /**
@@ -107,7 +107,7 @@ class AsgardeoReactClient<T extends AsgardeoReactConfig = AsgardeoReactConfig> e
     }
 
     return this.withLoading(async () => {
-      return this.asgardeo.init({...config, organizationHandle: resolvedOrganizationHandle} as any);
+      return this.asgardeo.init({ ...config, organizationHandle: resolvedOrganizationHandle } as any);
     });
   }
 
@@ -145,8 +145,8 @@ class AsgardeoReactClient<T extends AsgardeoReactConfig = AsgardeoReactConfig> e
         baseUrl = configData?.baseUrl;
       }
 
-      const profile = await getScim2Me({baseUrl});
-      const schemas = await getSchemas({baseUrl});
+      const profile = await getScim2Me({ baseUrl });
+      const schemas = await getSchemas({ baseUrl });
 
       return generateUserProfile(profile, flattenUserSchema(schemas));
     } catch (error) {
@@ -170,8 +170,8 @@ class AsgardeoReactClient<T extends AsgardeoReactConfig = AsgardeoReactConfig> e
           baseUrl = configData?.baseUrl;
         }
 
-        const profile = await getScim2Me({baseUrl});
-        const schemas = await getSchemas({baseUrl});
+        const profile = await getScim2Me({ baseUrl });
+        const schemas = await getSchemas({ baseUrl });
 
         const processedSchemas = flattenUserSchema(schemas);
 
@@ -201,11 +201,10 @@ class AsgardeoReactClient<T extends AsgardeoReactConfig = AsgardeoReactConfig> e
         baseUrl = configData?.baseUrl;
       }
 
-      return getMeOrganizations({baseUrl});
+      return getMeOrganizations({ baseUrl });
     } catch (error) {
       throw new AsgardeoRuntimeError(
-        `Failed to fetch the user's associated organizations: ${
-          error instanceof Error ? error.message : String(error)
+        `Failed to fetch the user's associated organizations: ${error instanceof Error ? error.message : String(error)
         }`,
         'AsgardeoReactClient-getMyOrganizations-RuntimeError-001',
         'react',
@@ -223,7 +222,7 @@ class AsgardeoReactClient<T extends AsgardeoReactConfig = AsgardeoReactConfig> e
         baseUrl = configData?.baseUrl;
       }
 
-      return getAllOrganizations({baseUrl});
+      return getAllOrganizations({ baseUrl });
     } catch (error) {
       throw new AsgardeoRuntimeError(
         `Failed to fetch all organizations: ${error instanceof Error ? error.message : String(error)}`,
@@ -282,7 +281,7 @@ class AsgardeoReactClient<T extends AsgardeoReactConfig = AsgardeoReactConfig> e
           signInRequired: true,
         };
 
-        return (await this.asgardeo.exchangeToken(exchangeConfig, (user: User) => {})) as TokenResponse | Response;
+        return (await this.asgardeo.exchangeToken(exchangeConfig, (user: User) => { })) as TokenResponse | Response;
       } catch (error) {
         throw new AsgardeoRuntimeError(
           `Failed to switch organization: ${error.message || error}`,
@@ -315,7 +314,7 @@ class AsgardeoReactClient<T extends AsgardeoReactConfig = AsgardeoReactConfig> e
     sessionId?: string,
   ): Promise<TokenResponse | Response> {
     return this.withLoading(async () => {
-      return this.asgardeo.exchangeToken(config, (user: User) => {}) as unknown as TokenResponse | Response;
+      return this.asgardeo.exchangeToken(config, (user: User) => { }) as unknown as TokenResponse | Response;
     });
   }
 
@@ -335,20 +334,39 @@ class AsgardeoReactClient<T extends AsgardeoReactConfig = AsgardeoReactConfig> e
       const arg1 = args[0];
       const arg2 = args[1];
 
-      const config: AsgardeoReactConfig = (await this.asgardeo.getConfigData()) as AsgardeoReactConfig;
+      const config: AsgardeoReactConfig | undefined = (await this.asgardeo.getConfigData()) as AsgardeoReactConfig | undefined;
+
+      const platformFromStorage = sessionStorage.getItem('asgardeo_platform');
+      const isV2Platform =
+        (config && config.platform === Platform.AsgardeoV2) ||
+        platformFromStorage === 'AsgardeoV2';
 
       if (
-        config.platform === Platform.AsgardeoV2 &&
+        isV2Platform &&
         typeof arg1 === 'object' &&
+        arg1 !== null &&
+        (arg1 as any).callOnlyOnRedirect === true
+      ) {
+        return undefined as any;
+      }
+
+      if (
+        isV2Platform &&
+        typeof arg1 === 'object' &&
+        arg1 !== null &&
         !isEmpty(arg1) &&
         ('flowId' in arg1 || 'applicationId' in arg1)
       ) {
-        const sessionDataKey: string = new URL(window.location.href).searchParams.get('sessionDataKey');
+        const sessionDataKeyFromUrl: string = new URL(window.location.href).searchParams.get('sessionDataKey');
+        const sessionDataKeyFromStorage: string = sessionStorage.getItem('asgardeo_session_data_key');
+        const sessionDataKey: string = sessionDataKeyFromUrl || sessionDataKeyFromStorage;
+        const baseUrlFromStorage: string = sessionStorage.getItem('asgardeo_base_url');
+        const baseUrl: string = config?.baseUrl || baseUrlFromStorage;
 
         return executeEmbeddedSignInFlowV2({
           payload: arg1 as EmbeddedSignInFlowHandleRequestPayload,
           url: arg2?.url,
-          baseUrl: config?.baseUrl,
+          baseUrl,
           sessionDataKey,
         });
       }
