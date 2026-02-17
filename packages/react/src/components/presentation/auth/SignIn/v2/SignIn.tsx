@@ -19,6 +19,8 @@
 import {FC, useState, useEffect, useRef, ReactNode} from 'react';
 import BaseSignIn, {BaseSignInProps} from './BaseSignIn';
 import useAsgardeo from '../../../../../contexts/Asgardeo/useAsgardeo';
+import {initiateOAuthRedirect} from '../../../../../utils/oauth';
+import {useOAuthCallback} from '../../../../../hooks/useOAuthCallback';
 import {
   AsgardeoRuntimeError,
   EmbeddedFlowComponentV2 as EmbeddedFlowComponent,
@@ -249,17 +251,6 @@ const SignIn: FC<SignInProps> = ({className, size = 'medium', onSuccess, onError
     }
   };
 
-  /**
-   * Resolve flowId from multiple sources with priority: currentFlowId > state > flowIdFromUrl > storedFlowId
-   */
-  const resolveFlowId = (
-    currentFlowId: string | null,
-    state: string | null,
-    flowIdFromUrl: string | null,
-    storedFlowId: string | null,
-  ): string | null => {
-    return currentFlowId || state || flowIdFromUrl || storedFlowId || null;
-  };
 
   /**
    * Clean up OAuth-related URL parameters from the browser URL.
@@ -327,7 +318,8 @@ const SignIn: FC<SignInProps> = ({className, size = 'medium', onSuccess, onError
         const urlParams = getUrlParams();
         handleAuthId(urlParams.authId);
 
-        window.location.href = redirectURL;
+        // Initiate OAuth redirect to external provider
+        initiateOAuthRedirect(redirectURL);
         return true;
       }
     }
@@ -564,48 +556,18 @@ const SignIn: FC<SignInProps> = ({className, size = 'medium', onSuccess, onError
     setError(error);
   };
 
-  /**
-   * Handle OAuth code processing from external OAuth providers.
-   */
-  useEffect(() => {
-    const urlParams = getUrlParams();
-    const storedFlowId = sessionStorage.getItem('asgardeo_flow_id');
-
-    // Check for OAuth error first - if present, don't process code
-    if (urlParams.error) {
-      handleOAuthError(urlParams.error, urlParams.errorDescription);
-      oauthCodeProcessedRef.current = true; // Mark as processed to prevent retry
-      return;
-    }
-
-    if (!urlParams.code || oauthCodeProcessedRef.current || isSubmitting) {
-      return;
-    }
-
-    const flowIdToUse = resolveFlowId(currentFlowId, urlParams.state, urlParams.flowId, storedFlowId);
-
-    if (!flowIdToUse || !signIn) {
-      return;
-    }
-
-    oauthCodeProcessedRef.current = true;
-
-    if (!currentFlowId) {
-      setFlowId(flowIdToUse);
-    }
-    const submitPayload: EmbeddedSignInFlowRequestV2 = {
-      flowId: flowIdToUse,
-      inputs: {
-        code: urlParams.code,
-        ...(urlParams.nonce && {nonce: urlParams.nonce}),
-      },
-    };
-
-    handleSubmit(submitPayload).catch(error => {
-      cleanupOAuthUrlParams(true);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isFlowInitialized, currentFlowId, isInitialized, isLoading, isSubmitting, signIn]);
+  useOAuthCallback({
+    onSubmit: async (payload) => handleSubmit({flowId: payload.flowId, inputs: payload.inputs}),
+    onError: (err) => {
+      clearFlowState();
+      setError(err instanceof Error ? err : new Error(String(err)));
+    },
+    currentFlowId,
+    isInitialized: isInitialized && !isLoading,
+    isSubmitting,
+    setFlowId,
+    processedRef: oauthCodeProcessedRef,
+  });
 
 
   /**

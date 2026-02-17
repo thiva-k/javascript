@@ -198,10 +198,7 @@ const AcceptInvite: FC<AcceptInviteProps> = ({
                 'Content-Type': 'application/json',
                 Accept: 'application/json',
             },
-            body: JSON.stringify({
-                ...payload,
-                verbose: true,
-            }),
+            body: JSON.stringify({...payload, verbose: true}),
         });
 
         if (!response.ok) {

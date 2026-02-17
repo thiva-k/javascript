@@ -20,6 +20,8 @@ import { FC, ReactElement, ReactNode, useCallback, useEffect, useRef, useState }
 import { cx } from '@emotion/css';
 import { renderInviteUserComponents } from '../../AuthOptionFactory';
 import { normalizeFlowResponse, extractErrorMessage } from '../../../../../utils/v2/flowTransformer';
+import { initiateOAuthRedirect } from '../../../../../utils/oauth';
+import { useOAuthCallback } from '../../../../../hooks/useOAuthCallback';
 import useTranslation from '../../../../../hooks/useTranslation';
 import useTheme from '../../../../../contexts/Theme/useTheme';
 import useStyles from './BaseAcceptInvite.styles';
@@ -42,6 +44,7 @@ export interface AcceptInviteFlowResponse {
             components?: any[];
         };
         additionalData?: Record<string, string>;
+        redirectURL?: string;
     };
     failureReason?: string;
 }
@@ -284,6 +287,44 @@ const BaseAcceptInvite: FC<BaseAcceptInviteProps> = ({
     );
 
     /**
+     * Handle OAuth callback when returning from OAuth provider.
+     * This hook processes the authorization code and continues the flow.
+     */
+    useOAuthCallback({
+        onSubmit: async (payload) => {
+            const rawResponse = await onSubmit(payload);
+            const response = normalizeFlowResponseLocal(rawResponse);
+            return response;
+        },
+        onComplete: () => {
+            setIsComplete(true);
+            setIsValidatingToken(false);
+            onComplete?.();
+        },
+        onError: (error) => {
+            setIsTokenInvalid(true);
+            setIsValidatingToken(false);
+            handleError(error);
+        },
+        onProcessingStart: () => {
+            setIsValidatingToken(true);
+        },
+        currentFlowId: flowId,
+        isInitialized: true,
+        tokenValidationAttemptedRef,
+        onFlowChange: (response) => {
+            onFlowChange?.(response);
+            // Initialize currentFlow for next steps if not complete
+            if (response.flowStatus !== 'COMPLETE') {
+                setCurrentFlow(response);
+                setFormValues({});
+                setFormErrors({});
+                setTouchedFields({});
+            }
+        },
+    });
+
+    /**
      * Normalize flow response to ensure component-driven format.
      * Transforms data.meta.components to data.components.
      */
@@ -414,6 +455,16 @@ const BaseAcceptInvite: FC<BaseAcceptInviteProps> = ({
                 const response = normalizeFlowResponseLocal(rawResponse);
                 onFlowChange?.(response);
 
+                // Handle OAuth redirect response
+                if (response.type === 'REDIRECTION') {
+                    const redirectURL = response.data?.redirectURL || (response as any)?.redirectURL;
+                    if (redirectURL && typeof window !== 'undefined') {
+                        // Initiate OAuth redirect with secure state management
+                        initiateOAuthRedirect(redirectURL);
+                        return;
+                    }
+                }
+
                 // Store the heading from current flow before completion
                 if (currentFlow?.data?.components || currentFlow?.data?.meta?.components) {
                     const currentComponents = currentFlow.data.components || currentFlow.data.meta?.components || [];
@@ -456,12 +507,16 @@ const BaseAcceptInvite: FC<BaseAcceptInviteProps> = ({
      * Validate invite token on component mount.
      */
     useEffect(() => {
-        if (!flowId || !inviteToken || tokenValidationAttemptedRef.current) {
-            if (!flowId || !inviteToken) {
-                setIsValidatingToken(false);
-                setIsTokenInvalid(true);
-                handleError(new Error('Invalid invite link. Missing flowId or inviteToken.'));
-            }
+        // Skip validation if already validated
+        if (tokenValidationAttemptedRef.current) {
+            return;
+        }
+
+        // Validate required params for initial invite link
+        if (!flowId || !inviteToken) {
+            setIsValidatingToken(false);
+            setIsTokenInvalid(true);
+            handleError(new Error('Invalid invite link. Missing flowId or inviteToken.'));
             return;
         }
 
@@ -472,6 +527,11 @@ const BaseAcceptInvite: FC<BaseAcceptInviteProps> = ({
             setApiError(null);
 
             try {
+                // Store flowId in sessionStorage for OAuth callback
+                if (flowId) {
+                    sessionStorage.setItem('asgardeo_flow_id', flowId);
+                }
+
                 // Send the invite token to validate and continue the flow
                 const payload = {
                     flowId,
